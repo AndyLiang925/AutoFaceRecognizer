@@ -1,143 +1,148 @@
 import face_recognition
 import cv2
 import numpy as np
-import ctypes
-from pynput import keyboard, mouse
+import os
 
-# 获取摄像头
-video_capture = cv2.VideoCapture(0)
 
-# 加载图片并获取人脸编码
-a_image = face_recognition.load_image_file("")
-a_face_encoding = face_recognition.face_encodings(a_image)[0]
+class FaceRecognitionSystem:
+    def __init__(self, faces_dir="faces"):
+        """Initialize the face recognition system.
 
-b_image = face_recognition.load_image_file("")
-b_face_encoding = face_recognition.face_encodings(b_image)[0]
+        Args:
+            faces_dir: Directory containing face images for recognition.
+                       Each image should be named as "person_name.jpg".
+        """
+        self.video_capture = None
+        self.known_face_encodings = []
+        self.known_face_names = []
+        self.face_locations = []
+        self.face_names = []
+        self.process_this_frame = True
 
-c_image = face_recognition.load_image_file("")
-c_face_encoding = face_recognition.face_encodings(c_image)[0]
+        # Load known faces from directory
+        self.load_known_faces(faces_dir)
 
-known_face_encodings = [b_face_encoding,  c_face_encoding, a_face_encoding]
-known_face_names = ["b",  "c", "a"]
+    def load_known_faces(self, faces_dir):
+        """Load known faces from the specified directory."""
+        if not os.path.exists(faces_dir):
+            print(f"Directory '{faces_dir}' not found. Creating it...")
+            os.makedirs(faces_dir)
+            print(f"Please add your face images to '{faces_dir}' directory.")
+            return
 
-face_locations = []
-face_encodings = []
-face_names = []
-process_this_frame = True
+        print(f"Loading known faces from '{faces_dir}'...")
+        for filename in os.listdir(faces_dir):
+            if filename.endswith(('.jpg', '.jpeg', '.png')):
+                # Get person name from filename (without extension)
+                name = os.path.splitext(filename)[0]
+                image_path = os.path.join(faces_dir, filename)
 
-# 标记是否有鼠标或键盘事件触发
-event_trigger = False
+                try:
+                    # Load image and get face encoding
+                    image = face_recognition.load_image_file(image_path)
+                    face_encodings = face_recognition.face_encodings(image)
 
-# 定义全局退出标志
-exit_program = False
+                    if len(face_encodings) > 0:
+                        self.known_face_encodings.append(face_encodings[0])
+                        self.known_face_names.append(name)
+                        print(f"Loaded face: {name}")
+                    else:
+                        print(f"No face found in image: {filename}")
+                except Exception as e:
+                    print(f"Error loading image {filename}: {e}")
 
-# --- 定义 pynput 事件回调函数 ---
+        print(f"Loaded {len(self.known_face_names)} faces")
 
-# 鼠标事件：移动、点击或滚动均视为触发事件
-def on_move(x, y):
-    global event_trigger
-    event_trigger = True
+    def start_video(self, camera_index=0):
+        """Start video capture from specified camera."""
+        self.video_capture = cv2.VideoCapture(camera_index)
+        if not self.video_capture.isOpened():
+            print("Error: Could not open video capture device.")
+            return False
+        return True
 
-def on_click(x, y, button, pressed):
-    global event_trigger
-    if pressed:
-        event_trigger = True
+    def process_frame(self, frame):
+        """Process a video frame for face recognition."""
+        # Only process every other frame to save processing power
+        if self.process_this_frame:
+            # Resize frame to 1/4 size for faster processing
+            small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
 
-def on_scroll(x, y, dx, dy):
-    global event_trigger
-    event_trigger = True
+            # Convert from BGR to RGB (which face_recognition uses)
+            rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
 
-# 键盘事件：任意按键均视为触发事件，同时检测退出键（例如 'q'）
-def on_press(key):
-    global event_trigger, exit_program
-    event_trigger = True
-    try:
-        if key.char == 'q':  # 按下 q 键退出程序
-            exit_program = True
-            return False  # 停止键盘监听
-    except AttributeError:
-        # 针对特殊键不作处理
-        pass
+            # Find faces in the current frame
+            self.face_locations = face_recognition.face_locations(rgb_small_frame)
+            face_encodings = face_recognition.face_encodings(rgb_small_frame, self.face_locations)
 
-# --- 启动 pynput 监听器 ---
-mouse_listener = mouse.Listener(on_move=on_move, on_click=on_click, on_scroll=on_scroll)
-keyboard_listener = keyboard.Listener(on_press=on_press)
-mouse_listener.start()
-keyboard_listener.start()
+            self.face_names = []
+            for face_encoding in face_encodings:
+                # Compare with known faces
+                if len(self.known_face_encodings) > 0:
+                    matches = face_recognition.compare_faces(self.known_face_encodings, face_encoding)
+                    name = "Unknown"
 
-# 主循环：读取摄像头并进行人脸检测
-while True:
-    ret, frame = video_capture.read()
-    if not ret:
-        break
+                    # Use the closest match
+                    face_distances = face_recognition.face_distance(self.known_face_encodings, face_encoding)
+                    best_match_index = np.argmin(face_distances)
+                    if matches[best_match_index] and face_distances[best_match_index] <= 0.45:
+                        name = self.known_face_names[best_match_index]
 
-    # 每隔一帧进行人脸检测并绘制结果
-    if process_this_frame:
-        small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-        # 转换 BGR -> RGB
-        rgb_small_frame = small_frame[:, :, ::-1]
-        rgb_small_frame = cv2.cvtColor(rgb_small_frame, cv2.COLOR_BGR2RGB)
+                    self.face_names.append(name)
+                else:
+                    self.face_names.append("Unknown - No known faces loaded")
 
-        face_locations = face_recognition.face_locations(rgb_small_frame)
-        face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
+        self.process_this_frame = not self.process_this_frame
 
-        face_names = []
-        for face_encoding in face_encodings:
-            matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-            name = "Unknown"
-            face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
-            best_match_index = np.argmin(face_distances)
-            if matches[best_match_index]:
-                name = known_face_names[best_match_index]
-            face_names.append(name)
-    process_this_frame = not process_this_frame
+        # Display the results
+        for (top, right, bottom, left), name in zip(self.face_locations, self.face_names):
+            # Scale back up face locations since the frame we detected in was scaled to 1/4 size
+            top *= 4
+            right *= 4
+            bottom *= 4
+            left *= 4
 
-    # 如果检测到鼠标或键盘事件，则重新检测当前帧中是否出现
-    if event_trigger:
-        # 对当前帧进行事件时的人脸检测
-        small_frame_event = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-        rgb_small_frame_event = small_frame_event[:, :, ::-1]
-        rgb_small_frame_event = cv2.cvtColor(rgb_small_frame_event, cv2.COLOR_BGR2RGB)
-        face_locations_event = face_recognition.face_locations(rgb_small_frame_event)
-        face_encodings_event = face_recognition.face_encodings(rgb_small_frame_event, face_locations_event)
-        face_names_event = []
-        for face_encoding in face_encodings_event:
-            matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-            name = "Unknown"
-            face_distances = face_recognition.face_distance(known_face_encodings, face_encoding)
-            best_match_index = np.argmin(face_distances)
-            if matches[best_match_index]:
-                name = known_face_names[best_match_index]
-            face_names_event.append(name)
-        print("事件检测结果：", face_names_event)
-        # 如果检测结果中不包含，则锁定工作站
-        if c not in face_names_event:
-            print("警告：未检测到 锁定屏幕！")
-            ctypes.windll.user32.LockWorkStation()
-        event_trigger = False  # 重置事件标志
+            # Draw a box around the face
+            cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
 
-    # 绘制人脸检测结果
-    for (top, right, bottom, left), name in zip(face_locations, face_names):
-        # 恢复缩放比例
-        top *= 4
-        right *= 4
-        bottom *= 4
-        left *= 4
-        cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
-        cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
-        font = cv2.FONT_HERSHEY_DUPLEX
-        cv2.putText(frame, name, (left + 6, bottom - 6), font, 1.0, (255, 255, 255), 1)
+            # Draw a label with a name below the face
+            cv2.rectangle(frame, (left, bottom - 35), (right, bottom), (0, 0, 255), cv2.FILLED)
+            font = cv2.FONT_HERSHEY_DUPLEX
+            cv2.putText(frame, name, (left + 6, bottom - 6), font, 0.8, (255, 255, 255), 1)
 
-    cv2.imshow('Video', frame)
+        return frame
 
-    # 检测退出：如果 exit_program 被置为 True 或者窗口被关闭则退出循环
-    if exit_program or cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+    def run(self):
+        """Run the face recognition system."""
+        if not self.start_video():
+            return
 
-# 释放资源并关闭窗口
-video_capture.release()
-cv2.destroyAllWindows()
+        print("Starting face recognition. Press 'q' to quit.")
 
-# 停止 pynput 监听器
-mouse_listener.stop()
-keyboard_listener.stop()
+        while True:
+            # Capture frame-by-frame
+            ret, frame = self.video_capture.read()
+            if not ret:
+                print("Error: Failed to capture image")
+                break
+
+            # Process this frame
+            frame = self.process_frame(frame)
+
+            # Display the resulting image
+            cv2.imshow('Face Recognition', frame)
+
+            # Exit on 'q' key press
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        # Release the capture and close windows
+        self.video_capture.release()
+        cv2.destroyAllWindows()
+        print("Face recognition stopped")
+
+
+if __name__ == "__main__":
+    # Create and run the face recognition system
+    face_system = FaceRecognitionSystem()
+    face_system.run()
