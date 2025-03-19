@@ -92,7 +92,7 @@ while True:
             face_names.append(name)
     process_this_frame = not process_this_frame
 
-    # 如果检测到鼠标或键盘事件，则重新检测当前帧中是否出现“lhx”
+    # 如果检测到鼠标或键盘事件，则重新检测当前帧中是否出现
     if event_trigger:
         # 对当前帧进行事件时的人脸检测
         small_frame_event = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
@@ -110,9 +110,9 @@ while True:
                 name = known_face_names[best_match_index]
             face_names_event.append(name)
         print("事件检测结果：", face_names_event)
-        # 如果检测结果中不包含“lhx”，则锁定工作站
-        if "lhx" not in face_names_event:
-            print("警告：未检测到 lhx，锁定屏幕！")
+        # 如果检测结果中不包含，则锁定工作站
+        if c not in face_names_event:
+            print("警告：未检测到 锁定屏幕！")
             ctypes.windll.user32.LockWorkStation()
         event_trigger = False  # 重置事件标志
 
